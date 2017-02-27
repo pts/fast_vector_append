@@ -59,27 +59,26 @@ static inline C new_c(int i) { return i; }
 
 HAS_MEM_FUNC(swap, has_swap);
 
-template<class V, class T,
-         typename = typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, int>::type> // OK
-void append(V& v, T& t) {
-  v.resize(v.size() + 1); v.back().swap(t);
-}
+// !! doc: .append may modify its t argument.
 
-// TODO(pts): Why is remove_const needed here? otherwise it wouldn't match, but why?
-template<class V, class T,
-         typename = typename std::enable_if<!has_swap<T, void(T::*)(std::remove_const<T>&)>::value, int>::type>
-void append(V& v, T&& t) { v.push_back(std::move(t)); }
+template<class V, class T>
+typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
+append(V& v, T& t) { puts("A1"); v.resize(v.size() + 1); v.back().swap(t); }
 
-// !! Why redefinition?
-#if 0
-template<class V, class T,
-         typename = typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, int>::type>
-void append(V& v, T& t) { v.push_back(std::move(t)); }
-#endif
+// !! With L (has_swap is true), wh
 
-template<class V, class T,
-         typename = typename std::enable_if<!has_swap<T, void(T::*)(std::remove_const<T>&)>::value, int>::type>
-void append(V& v, const T& t) { v.push_back(t); }
+// !! TODO(pts): Why is remove_const needed here? otherwise it wouldn't match, but why?
+template<class V, class T>
+typename std::enable_if<!has_swap<T, void(T::*)(std::remove_const<T>&)>::value, void>::type
+append(V& v, T&& t) { puts("A2"); v.push_back(std::move(t)); }
+
+template<class V, class T>
+typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
+append(V& v, T& t) { puts("A3"); v.push_back(std::move(t)); }
+
+template<class V, class T>
+typename std::enable_if<!has_swap<T, void(T::*)(std::remove_const<T>&)>::value, void>::type
+append(V& v, const T& t) { puts("A4"); v.push_back(t); }
 
 #else  // C++98.
 
@@ -109,12 +108,12 @@ int main(int argc, char **argv) {
   puts("---C0");
   std::vector<C> v;
   v.reserve(20);  // Prevent reallocation: C(const C&) + ~C() for old elements.
-  // append(v, 42);  // SUXX: Doesn't work, even thouh v.push_back(42) does.
+  // append(v, 42);  // SUXX: Doesn't work, even thouh v.push_back(42) does.  !! Make it fast.
   puts("---C1");
-  append(v, C(42));
+  append(v, C(42));  // Fast. Uses the move constructor.
 #ifdef USE_CXX11
   puts("---C2");
-  v.emplace_back(42);
+  v.emplace_back(42);  // Fastest.
 #endif
   puts("---C3");
   { C c(42); append(v, c); }
@@ -124,71 +123,14 @@ int main(int argc, char **argv) {
   std::vector<L> w;
   w.reserve(20);  // Prevent reallocation: C(const C&) + ~C() for old elements.
   puts("---L1");
-  append(w, L(42));  // Slow.
+  append(w, L(42));  // Slow.  !! Why A2 here?
 #ifdef USE_CXX11
   puts("---L2");
-  w.emplace_back(42);
+  w.emplace_back(42);  // Fastest.
 #endif
   puts("---L3");
   { L l(42); append(w, l); }
   
-  
-
-#if 0  
-  
-  
-  if (argc <= 1) {
-    // C++98 and C++11: C(int), C(const C&), ~C().
-    //   We want to avoid the expensive C(const C&) here.
-    // C++11 with USE_MOVE: C(int), C(C&&), ~C().
-    v.push_back(42);  // This doesn't work with C(C&&) = delete;
-    v.push_back(43);
-    v.push_back(new_c(44));
-    v.push_back(new_c(45));
-#if 1
-  } else if (argc == 2) {
-    // C(int), C(), C(const C&), ~C(), C.swap, ~C()
-    // This is already better, provided that C(), C(const C&) on empty
-    // and ~C() on empty are fast, i.e. together much faster than
-    // C(const C&) on nonempty, ~C(). This is the case if T == std::string.
-    { C c(42); v.push_back(C()); v.back().swap(c); }
-    { C c(43); v.push_back(C()); v.back().swap(c); }
-    { C c(44); v.push_back(C()); v.back().swap(c); }
-    { C c(45); v.push_back(C()); v.back().swap(c); }
-  } else if (argc == 3) {
-    // C++98: C(int), C(), C(const C&), C(const C&), ~C(), ~C(), C.swap, ~C().
-    // C++11: C(int), C(), C.swap, ~C().
-    { C c(42); v.resize(v.size() + 1); v.back().swap(c); }
-#endif
-#ifdef USE_CXX11
-  } else if (argc == 4) {
-    // For each emplace_back: C(int). Great!
-    v.emplace_back(42);
-    v.emplace_back(43);
-    // C(int), C(const C&), ~C(). Slow. Don't do it.
-    //v.emplace_back(C(44));  // This doesn't work with C(C&&) = delete;
-    //v.emplace_back(C(45));
-#endif
-#ifdef zzzzUSE_CXX11
-  } else if (argc == 5) {
-    append(v, C(42));
-#endif
-  }
-  puts("---A1");
-#if 1
-  C c(42);
-  append(v, c);
-#endif
-#if 1
-  const C& ccr(42);
-  append(v, ccr);
-#endif
-  puts(has_swap<std::vector<C>, void(std::vector<C>::*)(std::vector<C>&)>::value ? "+" : "-");
-  puts("---A2");
-  append(v, C(42));  // !! This should be a move!
-  puts("---A3");
-#endif
-
   puts("---RETURN");
   return 0;
 }
