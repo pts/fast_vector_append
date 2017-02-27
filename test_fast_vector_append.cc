@@ -68,7 +68,7 @@ HAS_MEM_FUNC(swap, has_swap);
 #include <type_traits>  // std::is_move_constructible, std::enable_if etc.
 
 // !! doc: .append may modify its t argument, so it's destructive.
-//    Make it nondestructive? Only A1 matters.
+//    Make it nondestructive? Only A1 and A5 matter. Crate append_move?
 
 template<typename V, typename T>
 typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
@@ -93,8 +93,10 @@ append(V& v, T& t) { puts("A5"); v.push_back(std::move(t)); }
 //typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
 //append(V& v, const T& t) { puts("A6"); v.push_back(t); }
 
+// TODO(pts): Maybe use remove_const on V::value_type? Add tests.
 template<typename V, typename T>
-void append(V& v, const T& t) { puts("A7"); v.push_back(t); }  // Fallback, slow.
+typename std::enable_if<std::is_same<typename V::value_type, T>::value, void>::type
+append(V& v, const T& t) { puts("A7"); v.push_back(t); }  // Fallback, slow.
 
 template<typename V, typename... Args>
 void append(V& v, Args... args) { puts("A9"); v.emplace_back(args...); }  // Fallback, slow.
@@ -156,7 +158,7 @@ int main(int argc, char **argv) {
   puts("---C5");
   append(v, new_c(42));  // Fast. Does a move.
   puts("---C6");
-  append(v, 42);  // Fastest. Uses A9. !! It really uses A7. SUXX.
+  append(v, 42);  // Fastest. Uses A9.
 #ifdef USE_CXX11
   puts("---C7");
   append(v, 4, 2);  // Fastest. Uses A9.
@@ -180,7 +182,7 @@ int main(int argc, char **argv) {
   puts("---L5");
   append(w, new_l(42));  // Fast. Uses swap.
   puts("---L6");
-  append(w, 42);  // Fastest. Uses A9.  // !! It really uses A7. SUXX.
+  append(w, 42);  // Fastest. Uses A9.
 #ifdef USE_CXX11
   puts("---L7");
   append(w, 4, 2);  // Fastest. Uses A9.
