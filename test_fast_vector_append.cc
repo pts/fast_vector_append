@@ -22,6 +22,8 @@ class L {
   friend void swap(L&, L&) { puts("L12.swap"); }
 };
 
+// This doesn't work work with `C(C&&) = delete;'. Sigh.
+static inline L new_l(int i) { return i; }
 
 class C {
  public:
@@ -29,23 +31,23 @@ class C {
   C(int) { puts("C(int)"); }
   ~C() { puts("~C()"); }
   C(const C&) { puts("C(const C&)"); }
-#if defined(USE_CXX11) && defined(USE_MOVE)
+#ifdef USE_CXX11
   C(C&&) { puts("C(C&&)"); }
-#else
-  //C(C&&) = delete;
 #endif
   C& operator=(const C&) { puts("C="); return *this; }
   // No member swap, new classes shouldn't have it.
-  // void swap(C&) { puts("C.swap"); }
+  // But we do add member swap if compiled over C++98,
+  // for faster append in some cases.
+#ifndef USE_CXX11
+  void swap(C&) { puts("C.swap"); }
+#endif
   friend void swap(C&, C&) { puts("C12.swap"); }
 };
 
 // This doesn't work work with `C(C&&) = delete;'. Sigh.
 static inline C new_c(int i) { return i; }
 
-#ifdef USE_CXX11
-#include <type_traits>  // std::is_move_constructible, std::enable_if etc.
-
+// TODO(pts): Which old C++98 compilers don't support this?
 #define HAS_MEM_FUNC(func, name)                                        \
     template<typename T, typename Sign>                                 \
     struct name {                                                       \
@@ -59,31 +61,58 @@ static inline C new_c(int i) { return i; }
 
 HAS_MEM_FUNC(swap, has_swap);
 
+#ifdef USE_CXX11
+
+#include <type_traits>  // std::is_move_constructible, std::enable_if etc.
+
 // !! doc: .append may modify its t argument.
 
 template<class V, class T>
 typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T& t) { puts("A1"); v.resize(v.size() + 1); v.back().swap(t); }
 
-// !! With L (has_swap is true), wh
-
-// !! TODO(pts): Why is remove_const needed here? otherwise it wouldn't match, but why?
 template<class V, class T>
-typename std::enable_if<!has_swap<T, void(T::*)(std::remove_const<T>&)>::value, void>::type
-append(V& v, T&& t) { puts("A2"); v.push_back(std::move(t)); }
+typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
+append(V& v, T&& t) { puts("A3"); v.resize(v.size() + 1); v.back().swap(t); }
 
 template<class V, class T>
 typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
-append(V& v, T& t) { puts("A3"); v.push_back(std::move(t)); }
+append(V& v, T&& t) { puts("A4"); v.push_back(std::move(t)); }
 
 template<class V, class T>
-typename std::enable_if<!has_swap<T, void(T::*)(std::remove_const<T>&)>::value, void>::type
-append(V& v, const T& t) { puts("A4"); v.push_back(t); }
+typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
+append(V& v, T& t) { puts("A5"); v.push_back(std::move(t)); }
+
+//template<class V, class T>
+//typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
+//append(V& v, const T& t) { puts("A2"); v.push_back(t); }
+//template<class V, class T>
+//typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
+//append(V& v, const T& t) { puts("A6"); v.push_back(t); }
+
+template<class V, class T>
+void append(V& v, const T& t) { puts("A7"); v.push_back(t); }  // Fallback, slow.
 
 #else  // C++98.
 
+// !! Use my_enable_if everywhere.
+
+template<bool B, class T = void>
+struct my_enable_if {};
+ 
+template<class T>
+struct my_enable_if<true, T> { typedef T type; };
+
 template<class V, class T>
-void append(V& v, const Y& t) { v.push_back(t); }
+typename my_enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
+append(V& v, T& t) { puts("O1"); v.push_back(T()); v.back().swap(t); }
+
+template<class V, class T>
+typename my_enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
+append(V& v, T& t) { puts("O5"); v.push_back(t); }  // Slow.
+
+template<class V, class T>
+void append(V& v, const T& t) { puts("O7"); v.push_back(t); }  // Fallback, slow.
 
 #endif
 
@@ -108,28 +137,35 @@ int main(int argc, char **argv) {
   puts("---C0");
   std::vector<C> v;
   v.reserve(20);  // Prevent reallocation: C(const C&) + ~C() for old elements.
-  // append(v, 42);  // SUXX: Doesn't work, even thouh v.push_back(42) does.  !! Make it fast.
+  // append(v, 42);  // SUXX: Doesn't work, even thouh v.push_back(42) does.  !! Make it work.
   puts("---C1");
-  append(v, C(42));  // Fast. Uses the move constructor.
+  append(v, C(42));  // Fast. Does a move.
 #ifdef USE_CXX11
   puts("---C2");
   v.emplace_back(42);  // Fastest.
-#endif
   puts("---C3");
-  { C c(42); append(v, c); }
-
+  v.emplace_back(C(42));  // Fast: does a move.
+#endif
+  puts("---C4");
+  { C c(42); append(v, c); }  // Fast. Does a move.
+  puts("---C5");
+  append(v, new_c(42));  // Fast. Does a move.
 
   puts("---L0");
   std::vector<L> w;
   w.reserve(20);  // Prevent reallocation: C(const C&) + ~C() for old elements.
   puts("---L1");
-  append(w, L(42));  // Slow.  !! Why A2 here?
+  append(w, L(42));  // Fast. Uses swap.
 #ifdef USE_CXX11
   puts("---L2");
   w.emplace_back(42);  // Fastest.
-#endif
   puts("---L3");
-  { L l(42); append(w, l); }
+  w.emplace_back(L(42));  // Slow, does a copy.
+#endif
+  puts("---L4");
+  { L l(42); append(w, l); }  // Fast. Uses swap.
+  puts("---L5");
+  append(w, new_l(42));  // Fast. Uses swap.
   
   puts("---RETURN");
   return 0;
