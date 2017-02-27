@@ -15,6 +15,7 @@ class L {
  public:
   L() { puts("L()"); }
   L(int) { puts("L(int)"); }
+  L(int, int) { puts("L(int, int)"); }
   ~L() { puts("~L()"); }
   L(const L&) { puts("L(const L&)"); }
   L& operator=(const L&) { puts("L="); return *this; }
@@ -29,6 +30,7 @@ class C {
  public:
   C() { puts("C()"); }
   C(int) { puts("C(int)"); }
+  C(int, int) { puts("C(int, int)"); }
   ~C() { puts("~C()"); }
   C(const C&) { puts("C(const C&)"); }
 #ifdef USE_CXX11
@@ -65,53 +67,57 @@ HAS_MEM_FUNC(swap, has_swap);
 
 #include <type_traits>  // std::is_move_constructible, std::enable_if etc.
 
-// !! doc: .append may modify its t argument.
+// !! doc: .append may modify its t argument, so it's destructive.
+//    Make it nondestructive? Only A1 matters.
 
-template<class V, class T>
+template<typename V, typename T>
 typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T& t) { puts("A1"); v.resize(v.size() + 1); v.back().swap(t); }
 
-template<class V, class T>
+template<typename V, typename T>
 typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T&& t) { puts("A3"); v.resize(v.size() + 1); v.back().swap(t); }
 
-template<class V, class T>
+template<typename V, typename T>
 typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T&& t) { puts("A4"); v.push_back(std::move(t)); }
 
-template<class V, class T>
+template<typename V, typename T>
 typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T& t) { puts("A5"); v.push_back(std::move(t)); }
 
-//template<class V, class T>
+//template<typename V, typename T>
 //typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
 //append(V& v, const T& t) { puts("A2"); v.push_back(t); }
-//template<class V, class T>
+//template<typename V, typename T>
 //typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
 //append(V& v, const T& t) { puts("A6"); v.push_back(t); }
 
-template<class V, class T>
+template<typename V, typename T>
 void append(V& v, const T& t) { puts("A7"); v.push_back(t); }  // Fallback, slow.
+
+template<typename V, typename... Args>
+void append(V& v, Args... args) { puts("A9"); v.emplace_back(args...); }  // Fallback, slow.
 
 #else  // C++98.
 
-// !! Use my_enable_if everywhere.
+// !! Use my_enable_if instead of std::enable_if everywhere.
 
-template<bool B, class T = void>
+template<bool B, typename T = void>
 struct my_enable_if {};
  
-template<class T>
+template<typename T>
 struct my_enable_if<true, T> { typedef T type; };
 
-template<class V, class T>
+template<typename V, typename T>
 typename my_enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T& t) { puts("O1"); v.push_back(T()); v.back().swap(t); }
 
-template<class V, class T>
+template<typename V, typename T>
 typename my_enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T& t) { puts("O5"); v.push_back(t); }  // Slow.
 
-template<class V, class T>
+template<typename V, typename T>
 void append(V& v, const T& t) { puts("O7"); v.push_back(t); }  // Fallback, slow.
 
 #endif
@@ -137,7 +143,6 @@ int main(int argc, char **argv) {
   puts("---C0");
   std::vector<C> v;
   v.reserve(20);  // Prevent reallocation: C(const C&) + ~C() for old elements.
-  // append(v, 42);  // SUXX: Doesn't work, even thouh v.push_back(42) does.  !! Make it work.
   puts("---C1");
   append(v, C(42));  // Fast. Does a move.
 #ifdef USE_CXX11
@@ -150,6 +155,14 @@ int main(int argc, char **argv) {
   { C c(42); append(v, c); }  // Fast. Does a move.
   puts("---C5");
   append(v, new_c(42));  // Fast. Does a move.
+  puts("---C6");
+  append(v, 42);  // Fastest. Uses A9. !! It really uses A7. SUXX.
+#ifdef USE_CXX11
+  puts("---C7");
+  append(v, 4, 2);  // Fastest. Uses A9.
+#endif
+  puts("---C8");
+  { const C& cr(42); append(v, cr); }  // Slow, does a copy.
 
   puts("---L0");
   std::vector<L> w;
@@ -166,6 +179,14 @@ int main(int argc, char **argv) {
   { L l(42); append(w, l); }  // Fast. Uses swap.
   puts("---L5");
   append(w, new_l(42));  // Fast. Uses swap.
+  puts("---L6");
+  append(w, 42);  // Fastest. Uses A9.  // !! It really uses A7. SUXX.
+#ifdef USE_CXX11
+  puts("---L7");
+  append(w, 4, 2);  // Fastest. Uses A9.
+#endif
+  puts("---L8");
+  { const L& lr(42); append(w, lr); }  // Slow, does a copy.
   
   puts("---RETURN");
   return 0;
