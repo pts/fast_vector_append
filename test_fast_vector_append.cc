@@ -70,6 +70,8 @@ HAS_MEM_FUNC(swap, has_swap);
 // !! doc: .append may modify its t argument, so it's destructive.
 //    Make it nondestructive? Only A1 and A5 matter. Crate append_move?
 
+// !! Only match these if is_same<V::value_type, T>.
+
 template<typename V, typename T>
 typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T& t) { puts("A1"); v.resize(v.size() + 1); v.back().swap(t); }
@@ -99,7 +101,7 @@ typename std::enable_if<std::is_same<typename V::value_type, T>::value, void>::t
 append(V& v, const T& t) { puts("A7"); v.push_back(t); }  // Fallback, slow.
 
 template<typename V, typename... Args>
-void append(V& v, Args... args) { puts("A9"); v.emplace_back(args...); }  // Fallback, slow.
+void append(V& v, Args... args) { puts("A9"); v.emplace_back(args...); }  // Fastest.
 
 #else  // C++98.
 
@@ -107,9 +109,13 @@ void append(V& v, Args... args) { puts("A9"); v.emplace_back(args...); }  // Fal
 
 template<bool B, typename T = void>
 struct my_enable_if {};
- 
 template<typename T>
 struct my_enable_if<true, T> { typedef T type; };
+
+template<class T, class U>
+struct my_is_same { static bool const value = false; };
+template<class T>
+struct my_is_same<T, T> { static bool const value = true; };
 
 template<typename V, typename T>
 typename my_enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
@@ -120,10 +126,17 @@ typename my_enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
 append(V& v, T& t) { puts("O5"); v.push_back(t); }  // Slow.
 
 template<typename V, typename T>
-void append(V& v, const T& t) { puts("O7"); v.push_back(t); }  // Fallback, slow.
+typename my_enable_if<my_is_same<typename V::value_type, T>::value || !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append(V& v, const T& t) { puts("O7"); v.push_back(t); }  // Fallback, slow.
+
+template<typename V, typename T>
+typename my_enable_if<!my_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append(V& v, const T& t) { puts("O9"); v.push_back(typename V::value_type()); typename V::value_type tt(t); v.back().swap(tt); }
 
 #endif
 
+// !! Fix it for std::string and std::vector.
+//
 // !! Update the doc.
 //
 // If your class C has a copy constructor which is slow unless the object
