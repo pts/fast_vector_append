@@ -67,75 +67,92 @@ HAS_MEM_FUNC(swap, has_swap);
 
 #include <type_traits>  // std::is_move_constructible, std::enable_if etc.
 
-// !! doc: .append may modify its t argument, so it's destructive.
-//    Make it nondestructive? Only A1 and A5 matter. Crate append_move?
+// TODO(pts): Maybe use remove_const on V::value_type? Add tests.
 
-// !! Only match these if is_same<V::value_type, T>.
-
-template<typename V, typename T>
-typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
-append(V& v, T& t) { puts("A1"); v.resize(v.size() + 1); v.back().swap(t); }
-
-template<typename V, typename T>
-typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
+template<typename V, typename T> static inline
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, T&& t) { puts("A3"); v.resize(v.size() + 1); v.back().swap(t); }
 
-template<typename V, typename T>
-typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
+template<typename V, typename T> static inline
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, T&& t) { puts("A4"); v.push_back(std::move(t)); }
 
-template<typename V, typename T>
-typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
-append(V& v, T& t) { puts("A5"); v.push_back(std::move(t)); }
-
-//template<typename V, typename T>
-//typename std::enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
-//append(V& v, const T& t) { puts("A2"); v.push_back(t); }
-//template<typename V, typename T>
-//typename std::enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
-//append(V& v, const T& t) { puts("A6"); v.push_back(t); }
-
-// TODO(pts): Maybe use remove_const on V::value_type? Add tests.
-template<typename V, typename T>
+template<typename V, typename T> static inline
 typename std::enable_if<std::is_same<typename V::value_type, T>::value, void>::type
-append(V& v, const T& t) { puts("A7"); v.push_back(t); }  // Fallback, slow.
+append(V& v, const T& t) { puts("A7SLOW"); v.push_back(t); }  // Fallback, slow.
 
-template<typename V, typename... Args>
+template<typename V, typename... Args> static inline
 void append(V& v, Args... args) { puts("A9"); v.emplace_back(args...); }  // Fastest.
+
+
+template<typename V, typename T> static inline
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append_move(V& v, T& t) { puts("AM1"); v.resize(v.size() + 1); v.back().swap(t); }
+
+template<typename V, typename T> static inline
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append_move(V& v, T&& t) { puts("AM3"); v.resize(v.size() + 1); v.back().swap(t); }
+
+template<typename V, typename T> static inline
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append_move(V& v, T&& t) { puts("AM4"); v.push_back(std::move(t)); }
+
+template<typename V, typename T> static inline
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append_move(V& v, T& t) { puts("AM5"); v.push_back(std::move(t)); }
 
 #else  // C++98.
 
-// !! Use my_enable_if instead of std::enable_if everywhere.
-
 template<bool B, typename T = void>
-struct my_enable_if {};
+struct __aph_enable_if {};
 template<typename T>
-struct my_enable_if<true, T> { typedef T type; };
+struct __aph_enable_if<true, T> { typedef T type; };
 
 template<class T, class U>
-struct my_is_same { static bool const value = false; };
+struct __aph_is_same { static bool const value = false; };
 template<class T>
-struct my_is_same<T, T> { static bool const value = true; };
+struct __aph_is_same<T, T> { static bool const value = true; };
 
-template<typename V, typename T>
-typename my_enable_if<has_swap<T, void(T::*)(T&)>::value, void>::type
+template<typename V, typename T> static inline
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, T& t) { puts("O1"); v.push_back(T()); v.back().swap(t); }
 
-template<typename V, typename T>
-typename my_enable_if<!has_swap<T, void(T::*)(T&)>::value, void>::type
-append(V& v, T& t) { puts("O5"); v.push_back(t); }  // Slow.
+template<typename V, typename T> static inline
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append(V& v, T& t) { puts("O5SLOW"); v.push_back(t); }  // Slow.
 
-template<typename V, typename T>
-typename my_enable_if<my_is_same<typename V::value_type, T>::value || !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
-append(V& v, const T& t) { puts("O7"); v.push_back(t); }  // Fallback, slow.
+template<typename V, typename T> static inline
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value || !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append(V& v, const T& t) { puts("O7SLOW"); v.push_back(t); }  // Fallback, slow.
 
-template<typename V, typename T>
-typename my_enable_if<!my_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+template<typename V, typename T> static inline
+typename __aph_enable_if<!__aph_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, const T& t) { puts("O9"); v.push_back(typename V::value_type()); typename V::value_type tt(t); v.back().swap(tt); }
+
+template<typename V, typename T1, typename T2> static inline
+typename __aph_enable_if<has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append(V& v, const T1& t1, const T2& t2) { puts("O9OO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2); v.back().swap(tt); }
+
+template<typename V, typename T1, typename T2, typename T3> static inline
+typename __aph_enable_if<has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append(V& v, const T1& t1, const T2& t2, const T3& t3) { puts("O9OOO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2, t3); v.back().swap(tt); }
+
+template<typename V, typename T1, typename T2, typename T3, typename T4> static inline
+typename __aph_enable_if<has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append(V& v, const T1& t1, const T2& t2, const T3& t3, const T4& t4) { puts("O9OOOO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2, t3, t4); v.back().swap(tt); }
+
+
+template<typename V, typename T> static inline
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append_move(V& v, T& t) { puts("O1"); v.push_back(T()); v.back().swap(t); }
+
+template<typename V, typename T> static inline
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+append_move(V& v, T& t) { puts("O5SLOW"); v.push_back(t); }  // Slow.
 
 #endif
 
-// !! Fix it for std::string and std::vector.
+// !! Fix it for std::string, std::vector, std::pair.
 //
 // !! Update the doc.
 //
@@ -155,11 +172,13 @@ append(V& v, const T& t) { puts("O9"); v.push_back(typename V::value_type()); ty
 
 int main(int argc, char **argv) {
   (void)argc; (void)argv;
+  // The ``fast'' applies to C++11 callers only.
+  // TODO(pts): Describe C++98 callers as well.
   puts("---C0");
   std::vector<C> v;
   v.reserve(20);  // Prevent reallocation: C(const C&) + ~C() for old elements.
   puts("---C1");
-  append(v, C(42));  // Fast. Does a move.
+  append(v, C(42));  // Fast: does a move.
 #ifdef USE_CXX11
   puts("---C2");
   v.emplace_back(42);  // Fastest.
@@ -167,41 +186,41 @@ int main(int argc, char **argv) {
   v.emplace_back(C(42));  // Fast: does a move.
 #endif
   puts("---C4");
-  { C c(42); append(v, c); }  // Fast. Does a move.
+  { C c(42); append_move(v, c); }  // Fast: does a move.
   puts("---C5");
-  append(v, new_c(42));  // Fast. Does a move.
+  append(v, new_c(42));  // Fast: does a move.
   puts("---C6");
-  append(v, 42);  // Fastest. Uses A9.
-#ifdef USE_CXX11
+  append(v, 42);  // Fastest: uses A9.
   puts("---C7");
-  append(v, 4, 2);  // Fastest. Uses A9.
-#endif
-  puts("---C8");
-  { const C& cr(42); append(v, cr); }  // Slow, does a copy.
+  append(v, 4, 2);  // Fastest: uses A9.
+  puts("---C8SLOWOK");
+  { const C& cr(42); append(v, cr); }  // Slow: does a copy.
+  puts("---C9SLOWOK");
+  { C c(42); append(v, c); }  // Slow: does a copy.
 
   puts("---L0");
   std::vector<L> w;
   w.reserve(20);  // Prevent reallocation: C(const C&) + ~C() for old elements.
   puts("---L1");
-  append(w, L(42));  // Fast. Uses swap.
+  append(w, L(42));  // Fast: uses swap.
 #ifdef USE_CXX11
   puts("---L2");
   w.emplace_back(42);  // Fastest.
   puts("---L3");
-  w.emplace_back(L(42));  // Slow, does a copy.
+  w.emplace_back(L(42));  // Slow: does a copy.
 #endif
   puts("---L4");
-  { L l(42); append(w, l); }  // Fast. Uses swap.
+  { L l(42); append_move(w, l); }  // Fast: uses swap.
   puts("---L5");
-  append(w, new_l(42));  // Fast. Uses swap.
+  append(w, new_l(42));  // Fast: uses swap.
   puts("---L6");
-  append(w, 42);  // Fastest. Uses A9.
-#ifdef USE_CXX11
+  append(w, 42);  // Fastest: uses O9.
   puts("---L7");
-  append(w, 4, 2);  // Fastest. Uses A9.
-#endif
-  puts("---L8");
-  { const L& lr(42); append(w, lr); }  // Slow, does a copy.
+  append(w, 4, 2);  // Fastest: uses O9.
+  puts("---L8SLOWOK");
+  { const L& lr(42); append(w, lr); }  // Slow: does a copy.
+  puts("---L9SLOWOK");
+  { L l(42); append(w, l); }  // Slow, does a copy.
   
   puts("---RETURN");
   return 0;
