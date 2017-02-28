@@ -2,8 +2,6 @@
 
 #include <stdio.h>
 
-#include <vector>
-
 #undef USE_CXX11
 /* Maybe _MSC_VER >= 1800 &&  __cplusplus == 199711L also works. */
 #if __cplusplus >= 201103L
@@ -49,48 +47,50 @@ class C {
 // This doesn't work work with `C(C&&) = delete;'. Sigh.
 static inline C new_c(int i) { return i; }
 
-// TODO(pts): Which old C++98 compilers don't support this?
-// From http://stackoverflow.com/a/264088/97248 .
-#define HAS_MEM_FUNC(func, name)                                        \
-    template<typename T, typename Sign>                                 \
-    struct name {                                                       \
-        typedef char yes[1];                                            \
-        typedef char no [2];                                            \
-        template <typename U, U> struct type_check;                     \
-        template <typename _1> static yes &chk(type_check<Sign, &_1::func > *); \
-        template <typename   > static no  &chk(...);                    \
-        static bool const value = sizeof(chk<T>(0)) == sizeof(yes);     \
-    }
-
-HAS_MEM_FUNC(swap, has_swap);
 
 #ifdef USE_CXX11
 
 #include <type_traits>  // std::is_move_constructible, std::enable_if etc.
 
-#include <utility>  // std::swap.
+#include <utility>  // For std::get.
 
-// !! Use swap iff: has swap, doesn't have shrink_to_fit, doesn't have get.
-// !! Simplify HAS_MEM_FUC for C++11.
+// Use swap iff: has swap, does't have std::get, doesn't have shrink_to_fit,
+// doesn't have emplace, doesn't have remove_suffix. By doing so we match
+// all C++11, C++14 and C++17 STL templates except for std::optional and
+// std::any. Not matching a few of them is not a problem because then member
+// .swap will be used on them, and that's good enough.
+template<typename T, typename SwapSignature>
+struct __aph_use_swap {
+  template <typename U, U> struct type_check;
+  template <typename B> static char (&chk_swap(type_check<SwapSignature, &B::swap>*))[2];
+  template <typename  > static char (&chk_swap(...))[1];
+  template <typename B> static char (&chk_get(decltype(std::get<0>(*(B*)0), 0)))[1];  // C++11 only: std::pair, std::tuple, std::variant, std::array.
+  template <typename  > static char (&chk_get(...))[2];
+  template <typename B> static char (&chk_s2f(decltype(((B*)0)->shrink_to_fit(), 0)))[1];  // C++11 only: std::vector, std::deque, std::string, std::basic_string.
+  template <typename  > static char (&chk_s2f(...))[2];
+  template <typename B> static char (&chk_empl(decltype(((B*)0)->emplace(), 0)))[1];  // C++11 only: std::vector, std::deque, std::set, std::multiset, std::map, std::multimap, std::unordered_multiset, std::unordered_map, std::unordered_multimap, std::stack, std::queue, std::priority_queue.
+  template <typename  > static char (&chk_empl(...))[2];
+  template <typename B> static char (&chk_rsuf(decltype(((B*)0)->remove_suffix(0), 0)))[1];  // C++17 only: std::string_view, std::basic_string_view.
+  template <typename  > static char (&chk_rsuf(...))[2];
+  static bool const value = sizeof(chk_swap<T>(0)) == 2 && sizeof(chk_get<T>(0)) == 2 && sizeof(chk_s2f<T>(0)) == 2 && sizeof(chk_empl<T>(0)) == 2 && sizeof(chk_rsuf<T>(0)) == 2;
+};
+
+// !! Remove this.
+template<typename V> static inline
+typename std::enable_if<__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+detect(const V& v) { puts("DETECT_YES"); (void)v; }
+
+template<typename V> static inline
+typename std::enable_if<!__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+detect(const V& v) { puts("DETECT_NO"); (void)v; }
 
 // TODO(pts): Maybe use remove_const on V::value_type? Add tests.
-
-//!!template<typename T, typename = decltype(std::swap(std::declval<T>(), std::declval<T>()))> static inline
-//template<typename T, typename = decltype(std::swap(*(T*)0, *(T*)0))> static inline
-#if 0
-template<typename T, typename = decltype(std::get<0>(*(T*)0))> static inline
-void detect(const T& t) { puts("DETECT"); (void)t; }
-
-template<typename T, typename = decltype(((T*)0)->shrink_to_fit())> static inline
-void detect2(const T& t) { puts("DETECT2"); (void)t; }
-#endif
-
 template<typename V, typename T> static inline
-typename std::enable_if<std::is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, T&& t) { puts("A3"); v.resize(v.size() + 1); v.back().swap(t); }
 
 template<typename V, typename T> static inline
-typename std::enable_if<std::is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && !__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, T&& t) { puts("A4"); v.push_back(std::move(t)); }
 
 template<typename V, typename T> static inline
@@ -102,19 +102,19 @@ void append(V& v, Args... args) { puts("A9"); v.emplace_back(args...); }  // Fas
 
 
 template<typename V, typename T> static inline
-typename std::enable_if<std::is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append_move(V& v, T& t) { puts("AM1"); v.resize(v.size() + 1); v.back().swap(t); }
 
 template<typename V, typename T> static inline
-typename std::enable_if<std::is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append_move(V& v, T&& t) { puts("AM3"); v.resize(v.size() + 1); v.back().swap(t); }
 
 template<typename V, typename T> static inline
-typename std::enable_if<std::is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && !__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append_move(V& v, T&& t) { puts("AM4"); v.push_back(std::move(t)); }
 
 template<typename V, typename T> static inline
-typename std::enable_if<std::is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename std::enable_if<std::is_same<typename V::value_type, T>::value && !__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append_move(V& v, T& t) { puts("AM5"); v.push_back(std::move(t)); }
 
 #else  // C++98.
@@ -129,47 +129,75 @@ struct __aph_is_same { static bool const value = false; };
 template<class T>
 struct __aph_is_same<T, T> { static bool const value = true; };
 
+// TODO(pts): Which old C++98 compilers don't support this?
+// Based on HAS_MEM_FUNC in http://stackoverflow.com/a/264088/97248 .
+/* !!
+template<typename T, typename Sign>
+class has_swap {
+  typedef char yes[1], no[2];
+  template <typename U, U> struct type_check;
+  template <typename C> static yes &chk(type_check<Sign, &C::swap>*);
+  template <typename  > static no  &chk(...);
+  static bool const value = sizeof(chk<T>(0)) == sizeof(yes);
+};
+*/
+
+template<typename T, typename SwapSignature>
+struct __aph_use_swap {
+  template <typename U, U> struct type_check;
+  template <typename C> static char (&chk_swap(type_check<SwapSignature, &C::swap>*))[1];
+  template <typename  > static char (&chk_swap(...))[2];
+  static bool const value = sizeof(chk_swap<T>(0)) == sizeof(char[1]);
+};
+
 template<typename V, typename T> static inline
-typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, T& t) { puts("O1"); v.push_back(T()); v.back().swap(t); }
 
 template<typename V, typename T> static inline
-typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && !__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, T& t) { puts("O5SLOW"); v.push_back(t); }  // Slow.
 
 template<typename V, typename T> static inline
-typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value || !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value || !__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, const T& t) { puts("O7SLOW"); v.push_back(t); }  // Fallback, slow.
 
 template<typename V, typename T> static inline
-typename __aph_enable_if<!__aph_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<!__aph_is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, const T& t) { puts("O9"); v.push_back(typename V::value_type()); typename V::value_type tt(t); v.back().swap(tt); }
 
 template<typename V> static inline
 void append(V& v) { puts("O9D"); v.push_back(typename V::value_type()); }
 
 template<typename V, typename T1, typename T2> static inline
-typename __aph_enable_if<has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, const T1& t1, const T2& t2) { puts("O9OO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2); v.back().swap(tt); }
 
 template<typename V, typename T1, typename T2, typename T3> static inline
-typename __aph_enable_if<has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, const T1& t1, const T2& t2, const T3& t3) { puts("O9OOO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2, t3); v.back().swap(tt); }
 
 template<typename V, typename T1, typename T2, typename T3, typename T4> static inline
-typename __aph_enable_if<has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, const T1& t1, const T2& t2, const T3& t3, const T4& t4) { puts("O9OOOO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2, t3, t4); v.back().swap(tt); }
 
 
 template<typename V, typename T> static inline
-typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append_move(V& v, T& t) { puts("O1"); v.push_back(T()); v.back().swap(t); }
 
 template<typename V, typename T> static inline
-typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && !has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
+typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value && !__aph_use_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append_move(V& v, T& t) { puts("O5SLOW"); v.push_back(t); }  // Slow.
 
 #endif
+
+#include <map>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
+
 
 // !! Fix it for std::string, std::vector, std::pair.
 //
@@ -245,10 +273,15 @@ int main(int argc, char **argv) {
   puts("--L10");
   append(w);  // Fastest: uses A9.
 
-#if 0
+#ifdef USE_CXX11
   puts("---DETECT");
-  { std::pair<int, char*> x; detect(x); }
-  { std::vector<int> x; detect2(x); }
+  detect(std::vector<std::pair<int, char*> >());  // NO
+  detect(std::vector<std::vector<int> >());  // NO
+  detect(std::vector<std::string>());  // NO
+  detect(std::vector<std::set<int> >());  // NO
+  detect(std::vector<std::map<int, char*> >());  // NO
+  detect(std::vector<C>());  // NO
+  detect(std::vector<L>());  // YES
 #endif
   
   puts("---RETURN");
