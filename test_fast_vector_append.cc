@@ -50,6 +50,7 @@ class C {
 static inline C new_c(int i) { return i; }
 
 // TODO(pts): Which old C++98 compilers don't support this?
+// From http://stackoverflow.com/a/264088/97248 .
 #define HAS_MEM_FUNC(func, name)                                        \
     template<typename T, typename Sign>                                 \
     struct name {                                                       \
@@ -67,7 +68,22 @@ HAS_MEM_FUNC(swap, has_swap);
 
 #include <type_traits>  // std::is_move_constructible, std::enable_if etc.
 
+#include <utility>  // std::swap.
+
+// !! Use swap iff: has swap, doesn't have shrink_to_fit, doesn't have get.
+// !! Simplify HAS_MEM_FUC for C++11.
+
 // TODO(pts): Maybe use remove_const on V::value_type? Add tests.
+
+//!!template<typename T, typename = decltype(std::swap(std::declval<T>(), std::declval<T>()))> static inline
+//template<typename T, typename = decltype(std::swap(*(T*)0, *(T*)0))> static inline
+#if 0
+template<typename T, typename = decltype(std::get<0>(*(T*)0))> static inline
+void detect(const T& t) { puts("DETECT"); (void)t; }
+
+template<typename T, typename = decltype(((T*)0)->shrink_to_fit())> static inline
+void detect2(const T& t) { puts("DETECT2"); (void)t; }
+#endif
 
 template<typename V, typename T> static inline
 typename std::enable_if<std::is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
@@ -128,6 +144,9 @@ append(V& v, const T& t) { puts("O7SLOW"); v.push_back(t); }  // Fallback, slow.
 template<typename V, typename T> static inline
 typename __aph_enable_if<!__aph_is_same<typename V::value_type, T>::value && has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
 append(V& v, const T& t) { puts("O9"); v.push_back(typename V::value_type()); typename V::value_type tt(t); v.back().swap(tt); }
+
+template<typename V> static inline
+void append(V& v) { puts("O9D"); v.push_back(typename V::value_type()); }
 
 template<typename V, typename T1, typename T2> static inline
 typename __aph_enable_if<has_swap<typename V::value_type, void(V::value_type::*)(typename V::value_type&)>::value, void>::type
@@ -197,6 +216,8 @@ int main(int argc, char **argv) {
   { const C& cr(42); append(v, cr); }  // Slow: does a copy.
   puts("---C9SLOWOK");
   { C c(42); append(v, c); }  // Slow: does a copy.
+  puts("--C10");
+  append(v);  // Fastest: uses A9.
 
   puts("---L0");
   std::vector<L> w;
@@ -221,6 +242,14 @@ int main(int argc, char **argv) {
   { const L& lr(42); append(w, lr); }  // Slow: does a copy.
   puts("---L9SLOWOK");
   { L l(42); append(w, l); }  // Slow, does a copy.
+  puts("--L10");
+  append(w);  // Fastest: uses A9.
+
+#if 0
+  puts("---DETECT");
+  { std::pair<int, char*> x; detect(x); }
+  { std::vector<int> x; detect2(x); }
+#endif
   
   puts("---RETURN");
   return 0;
