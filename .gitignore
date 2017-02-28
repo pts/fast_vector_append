@@ -1,0 +1,6 @@
+*~
+*.o
+a.out
+core
+cxx98.out
+cxx11.out
