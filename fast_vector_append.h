@@ -182,6 +182,9 @@ fast_vector_append(V& v, const T& t) { FAST_VECTOR_APPEND_PUTS("O7SLOW"); v.push
 // excessive code size. The downside is that it wouldn't compile with
 // constructors of V::value_type with >= 3 arguments and with >= 1 argument
 // taken by reference.
+//
+// More info:
+// http://eli.thegreenplace.net/2014/perfect-forwarding-and-universal-references-in-c/
 
 // n == 0.
 template<typename V> static inline
