@@ -33,7 +33,7 @@ C(const C&)
 ~C()
 ---C9SLOWOK
 C(int)
-A7SLOW
+A9
 C(const C&)
 ~C()
 --C10
@@ -77,7 +77,7 @@ L(const L&)
 ~L()
 ---L9SLOWOK
 L(int)
-A7SLOW
+A9
 L(const L&)
 ~L()
 --L10

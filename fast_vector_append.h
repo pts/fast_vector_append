@@ -81,7 +81,7 @@
 
 #include <type_traits>  // std::is_move_constructible, std::enable_if etc.
 
-#include <utility>  // For the declaration of std::get.
+#include <utility>  // For the declaration of std::get; also std::forward.
 
 // Use swap iff: has swap, does't have std::get, doesn't have shrink_to_fit,
 // doesn't have emplace, doesn't have remove_suffix. By doing so we match
@@ -122,8 +122,10 @@ template<typename V, typename T> static inline
 typename std::enable_if<std::is_same<typename V::value_type, T>::value, void>::type
 fast_vector_append(V& v, const T& t) { FAST_VECTOR_APPEND_PUTS("A7SLOW"); v.push_back(t); }  // Fallback, slow.
 
+// This does perfect forwarding. It's not perfect though, search for imperfect
+// in http://aristeia.com/TalkNotes/Facebook2012_PerfectForwarding.pdf
 template<typename V, typename... Args> static inline
-void fast_vector_append(V& v, Args... args) { FAST_VECTOR_APPEND_PUTS("A9"); v.emplace_back(args...); }  // Fastest.
+void fast_vector_append(V& v, Args&&... args) { FAST_VECTOR_APPEND_PUTS("A9"); v.emplace_back(std::forward<Args>(args)...); }  // Fastest.
 
 
 template<typename V, typename T> static inline
@@ -174,21 +176,45 @@ template<typename V, typename T> static inline
 typename __aph_enable_if<__aph_is_same<typename V::value_type, T>::value || !__aph_use_swap<typename V::value_type>::value, void>::type
 fast_vector_append(V& v, const T& t) { FAST_VECTOR_APPEND_PUTS("O7SLOW"); v.push_back(t); }  // Fallback, slow.
 
-template<typename V, typename T> static inline
-typename __aph_enable_if<!__aph_is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type>::value, void>::type
-fast_vector_append(V& v, const T& t) { FAST_VECTOR_APPEND_PUTS("O9"); v.push_back(typename V::value_type()); typename V::value_type tt(t); v.back().swap(tt); }
+// For n arguments (t1, t2, ... tn) in C++98, we need to write (1 << n)
+// instances, with & and const&. We do the 1 for n == 0, both 2 for n == 1
+// and all 4 for n == 2; for n >= 3 we only do the const&, to avoid
+// excessive code size. The downside is that it wouldn't compile with
+// constructors of V::value_type with >= 3 arguments and with >= 1 argument
+// taken by reference.
 
+// n == 0.
 template<typename V> static inline
 void fast_vector_append(V& v) { FAST_VECTOR_APPEND_PUTS("O9D"); v.push_back(typename V::value_type()); }
 
+// n == 1.
+template<typename V, typename T> static inline
+typename __aph_enable_if<!__aph_is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type>::value, void>::type
+fast_vector_append(V& v, const T& t) { FAST_VECTOR_APPEND_PUTS("O9O"); v.push_back(typename V::value_type()); typename V::value_type tt(t); v.back().swap(tt); }
+template<typename V, typename T> static inline
+typename __aph_enable_if<!__aph_is_same<typename V::value_type, T>::value && __aph_use_swap<typename V::value_type>::value, void>::type
+fast_vector_append(V& v, T& t) { FAST_VECTOR_APPEND_PUTS("O9R"); v.push_back(typename V::value_type()); typename V::value_type tt(t); v.back().swap(tt); }
+
+// n == 2.
 template<typename V, typename T1, typename T2> static inline
 typename __aph_enable_if<__aph_use_swap<typename V::value_type>::value, void>::type
 fast_vector_append(V& v, const T1& t1, const T2& t2) { FAST_VECTOR_APPEND_PUTS("O9OO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2); v.back().swap(tt); }
+template<typename V, typename T1, typename T2> static inline
+typename __aph_enable_if<__aph_use_swap<typename V::value_type>::value, void>::type
+fast_vector_append(V& v, const T1& t1, T2& t2) { FAST_VECTOR_APPEND_PUTS("O9OR"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2); v.back().swap(tt); }
+template<typename V, typename T1, typename T2> static inline
+typename __aph_enable_if<__aph_use_swap<typename V::value_type>::value, void>::type
+fast_vector_append(V& v, T1& t1, const T2& t2) { FAST_VECTOR_APPEND_PUTS("O9RO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2); v.back().swap(tt); }
+template<typename V, typename T1, typename T2> static inline
+typename __aph_enable_if<__aph_use_swap<typename V::value_type>::value, void>::type
+fast_vector_append(V& v, T1& t1, T2& t2) { FAST_VECTOR_APPEND_PUTS("O9RR"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2); v.back().swap(tt); }
 
+// n == 3.
 template<typename V, typename T1, typename T2, typename T3> static inline
 typename __aph_enable_if<__aph_use_swap<typename V::value_type>::value, void>::type
 fast_vector_append(V& v, const T1& t1, const T2& t2, const T3& t3) { FAST_VECTOR_APPEND_PUTS("O9OOO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2, t3); v.back().swap(tt); }
 
+// n == 4.
 template<typename V, typename T1, typename T2, typename T3, typename T4> static inline
 typename __aph_enable_if<__aph_use_swap<typename V::value_type>::value, void>::type
 fast_vector_append(V& v, const T1& t1, const T2& t2, const T3& t3, const T4& t4) { FAST_VECTOR_APPEND_PUTS("O9OOOO"); v.push_back(typename V::value_type()); typename V::value_type tt(t1, t2, t3, t4); v.back().swap(tt); }

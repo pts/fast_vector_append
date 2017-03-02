@@ -18,7 +18,7 @@ O7SLOW
 C(const C&)
 ~C()
 ---C6
-O9
+O9O
 C()
 C(const C&)
 ~C()
@@ -71,7 +71,7 @@ O7SLOW
 L(const L&)
 ~L()
 ---L6
-O9
+O9O
 L()
 L(const L&)
 ~L()
