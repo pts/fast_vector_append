@@ -4,7 +4,7 @@
 //
 // Example usage: g++ -std=c++0x -DFAST_VECTOR_APPEND_DEBUG -s -O2 -W -Wall test_fast_vector_append.cc && ./a.out >cxx11.out && diff cxx11_gxx48.exp cxx11.out
 // Example usage: g++ -ansi      -DFAST_VECTOR_APPEND_DEBUG -s -O2 -W -Wall test_fast_vector_append.cc && ./a.out >cxx98.out && diff cxx98_gxx48.exp cxx98.out
-// 
+//
 
 //#define FAST_VECTOR_APPEND_DEBUG
 #include "fast_vector_append.h"
